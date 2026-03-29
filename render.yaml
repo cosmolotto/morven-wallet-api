@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: morven-wallet-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AIRDROP_API_KEY
+        generateValue: true
+      - key: JWT_EXPIRY_HOURS
+        value: 72

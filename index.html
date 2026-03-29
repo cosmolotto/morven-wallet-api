@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>morven.js — MorvenWallet SDK</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Courier New', monospace; background: #0a0a12; color: #c8c8d8; line-height: 1.6; padding: 40px 20px; }
+  .container { max-width: 700px; margin: 0 auto; }
+  h1 { color: #e0c875; font-size: 32px; margin-bottom: 8px; }
+  .sub { color: #666; margin-bottom: 40px; font-size: 14px; }
+  h2 { color: #e0c875; font-size: 18px; margin: 32px 0 12px; }
+  pre { background: #111122; border: 1px solid #222233; border-radius: 8px; padding: 20px; overflow-x: auto; font-size: 13px; color: #a8d8a8; }
+  .tag { display: inline-block; background: #1a2a1a; color: #4caf50; border: 1px solid #4caf50; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>◈ morven.js</h1>
+  <p class="sub">MorvenWallet Auth SDK — CDN edition</p>
+  <span class="tag">v1.0.0</span>
+
+  <h2>Quick Start</h2>
+  <pre>&lt;script src="https://morven-sdk.vercel.app/morven.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  // Login
+  const { jwt, user } = await morvenWallet.login();
+
+  // Get balance
+  const { mrv } = await morvenWallet.getBalance(jwt);
+
+  // Pay with MRV
+  await morvenWallet.pay(jwt, 10, 'letterforge-pro');
+
+  // Render button
+  morvenWallet.renderButton('#login-area', {
+    onLogin: ({ user }) =&gt; console.log('Welcome', user.display_name)
+  });
+&lt;/script&gt;</pre>
+
+  <h2>CDN URL</h2>
+  <pre>https://morven-sdk.vercel.app/morven.js</pre>
+
+  <h2>Methods</h2>
+  <pre>morvenWallet.login()                       → { jwt, user }
+morvenWallet.getBalance(jwt)               → { mrv, usdt, usd_value }
+morvenWallet.pay(jwt, amount, productId)   → { success, tx_id, new_balance }
+morvenWallet.airdrop(walletId, amt, reason, key) → { success, tx_id }
+morvenWallet.logout()
+morvenWallet.isLoggedIn()                  → boolean
+morvenWallet.renderButton(selector, opts)</pre>
+</div>
+</body>
+</html>

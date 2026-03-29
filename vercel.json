@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "builds": [{ "src": "auth.js", "use": "@vercel/static" }],
+  "routes": [
+    { "src": "/sdk/morven.js", "dest": "/auth.js" },
+    { "src": "/morven.js",     "dest": "/auth.js" },
+    { "src": "/(.*)",          "dest": "/auth.js" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Cache-Control", "value": "public, max-age=300, stale-while-revalidate=86400" },
+        { "key": "Content-Type", "value": "application/javascript" }
+      ]
+    }
+  ]
+}
