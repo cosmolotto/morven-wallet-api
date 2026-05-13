@@ -1,7 +1,8 @@
 """
 MorvenWallet API — Flask backend
 Endpoints: /health, /auth/popup, /api/auth/login, /api/auth/callback,
-           /api/wallet/balance, /api/payments/pay, /api/airdrop
+           /api/wallet/balance, /api/payments/pay, /api/airdrop,
+           /checkout (GET + POST — used by native apps like VEIL)
 Deploy: Render (free tier) — push to cosmolotto/morven-wallet-api
 """
 import os, uuid, jwt as pyjwt, hashlib, secrets
@@ -362,6 +363,99 @@ def airdrop():
     finally:
         conn.close()
 
+# ── Checkout (native apps: VEIL etc.) ──────────────────────────────────────
+
+def _validate_checkout(product_id, amount):
+    """Mock validation. Replace with real on-chain MRV verification once token is deployed."""
+    if not product_id or amount <= 0:
+        return False, 'Invalid product_id or amount'
+    if amount > 10000:
+        return False, 'Amount exceeds mock checkout limit'
+    return True, None
+
+def _append_query(url, params):
+    """Append ?k=v&... to a URL, preserving existing query string."""
+    if not url:
+        return url
+    sep = '&' if '?' in url else '?'
+    parts = []
+    for k, v in params.items():
+        if v is None:
+            continue
+        parts.append('{}={}'.format(k, str(v).replace(' ', '%20')))
+    return url + sep + '&'.join(parts) if parts else url
+
+@app.route('/checkout', methods=['POST'])
+def checkout_post():
+    """Programmatic checkout — apps call this after collecting consent.
+    Body: { product_id, amount, return_url }
+    """
+    data        = request.get_json(silent=True) or request.form.to_dict() or {}
+    product_id  = (data.get('product_id') or '').strip()
+    return_url  = (data.get('return_url') or '').strip() or None
+    try:
+        amount = float(data.get('amount', 0))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'amount must be numeric'}), 400
+
+    ok, err = _validate_checkout(product_id, amount)
+    if not ok:
+        return jsonify({'success': False, 'error': err}), 400
+
+    tx_hash = 'mock_' + uuid.uuid4().hex[:10]
+    redirect_url = _append_query(return_url, {
+        'tx_hash'    : tx_hash,
+        'product'    : product_id,
+        'amount'     : amount,
+        'status'     : 'success',
+    }) if return_url else None
+
+    return jsonify({
+        'success'  : True,
+        'tx_hash'  : tx_hash,
+        'amount'   : amount,
+        'product_id': product_id,
+        'redirect' : redirect_url,
+        'mock'     : True,
+    })
+
+@app.route('/checkout', methods=['GET'])
+def checkout_get():
+    """Web-friendly checkout — used when a native app opens this URL in WebBrowser.
+    Query: ?product_id=...&amount=...&return_url=...
+    Renders a small confirm page; clicking Confirm triggers redirect with tx_hash.
+    """
+    product_id = (request.args.get('product_id') or request.args.get('product') or '').strip()
+    return_url = (request.args.get('return_url') or request.args.get('return') or '').strip() or None
+    try:
+        amount = float(request.args.get('amount', 0))
+    except (TypeError, ValueError):
+        amount = 0
+
+    ok, err = _validate_checkout(product_id, amount)
+    if not ok:
+        return render_template_string(CHECKOUT_HTML, error=err, product_id=product_id,
+                                      amount=amount, return_url=return_url or '', success=False,
+                                      tx_hash=None, redirect_url=None), 400
+
+    # auto-confirm flag — useful when called from inside an already-trusted in-app browser
+    auto = request.args.get('auto') == '1'
+    if auto:
+        tx_hash = 'mock_' + uuid.uuid4().hex[:10]
+        redirect_url = _append_query(return_url, {
+            'tx_hash'  : tx_hash,
+            'product'  : product_id,
+            'amount'   : amount,
+            'status'   : 'success',
+        }) if return_url else None
+        return render_template_string(CHECKOUT_HTML, error=None, product_id=product_id,
+                                      amount=amount, return_url=return_url or '', success=True,
+                                      tx_hash=tx_hash, redirect_url=redirect_url)
+
+    return render_template_string(CHECKOUT_HTML, error=None, product_id=product_id,
+                                  amount=amount, return_url=return_url or '', success=False,
+                                  tx_hash=None, redirect_url=None)
+
 # ── Popup HTML ─────────────────────────────────────────────────────────────
 
 AUTH_POPUP_HTML = """<!DOCTYPE html>
@@ -467,6 +561,125 @@ async function doLogin() {
 document.getElementById('email').addEventListener('keydown', e => {
   if (e.key === 'Enter') doLogin();
 });
+</script>
+</body>
+</html>"""
+
+CHECKOUT_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MorvenWallet Checkout</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0d0d1a; color: #e8e8f0;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .card {
+    background: #15152a; border: 1px solid #2a2a45;
+    border-radius: 16px; padding: 32px 28px;
+    width: 100%; max-width: 380px;
+  }
+  .logo { font-size: 36px; text-align: center; margin-bottom: 8px; color: #e0c875; }
+  h1 { font-size: 18px; font-weight: 700; color: #e0c875; margin-bottom: 4px; text-align: center; }
+  .sub { font-size: 12px; color: #888; text-align: center; margin-bottom: 22px; }
+  .row { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid #2a2a45; font-size: 13px; }
+  .row strong { color: #fff; }
+  .total { padding-top: 14px; font-size: 17px; }
+  .total strong { color: #e0c875; }
+  button {
+    width: 100%; padding: 12px; margin-top: 20px;
+    background: #e0c875; color: #0d0d1a;
+    border: none; border-radius: 8px;
+    font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.cancel { background: transparent; color: #888; border: 1px solid #2a2a45; margin-top: 10px; font-weight: 500; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .err { color: #ff6b6b; font-size: 13px; margin-top: 10px; text-align: center; }
+  .ok  { color: #4caf50; font-size: 13px; margin-top: 14px; text-align: center; line-height: 1.5; }
+  .mock { font-size: 10px; color: #666; text-align: center; margin-top: 14px; letter-spacing: 1px; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div class="card" id="checkout-card">
+  <div class="logo">◈</div>
+  <h1>MorvenWallet</h1>
+  <p class="sub">Confirm payment</p>
+
+  {% if error %}
+    <p class="err">{{ error }}</p>
+  {% elif success %}
+    <p class="ok">
+      ✓ Payment successful<br>
+      <span style="font-family:monospace;font-size:12px;color:#888">{{ tx_hash }}</span>
+    </p>
+    {% if redirect_url %}
+      <button onclick="window.location.href='{{ redirect_url }}'">Return to app →</button>
+      <script>setTimeout(function(){ window.location.href='{{ redirect_url }}'; }, 1500);</script>
+    {% else %}
+      <button onclick="window.close()">Close</button>
+    {% endif %}
+  {% else %}
+    <div class="row"><span>Product</span><strong>{{ product_id }}</strong></div>
+    <div class="row"><span>Amount</span><strong>◈ {{ amount }} MRV</strong></div>
+    <div class="row total"><span>Total</span><strong>{{ amount }} MRV</strong></div>
+    <button id="confirm-btn" onclick="confirmPay()">Confirm payment</button>
+    <button class="cancel" onclick="cancelPay()">Cancel</button>
+    <p class="mock">Mock checkout · on-chain verification coming with token launch</p>
+  {% endif %}
+</div>
+<script>
+function renderSuccess(txHash) {
+  var card = document.getElementById('checkout-card');
+  while (card.firstChild) card.removeChild(card.firstChild);
+  var logo = document.createElement('div'); logo.className = 'logo'; logo.textContent = '✓';
+  var h1 = document.createElement('h1'); h1.textContent = 'Payment successful';
+  var sub = document.createElement('p'); sub.className = 'sub';
+  sub.style.fontFamily = 'monospace';
+  sub.textContent = txHash;
+  card.appendChild(logo); card.appendChild(h1); card.appendChild(sub);
+}
+async function confirmPay() {
+  var btn = document.getElementById('confirm-btn');
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+  try {
+    var r = await fetch('/checkout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: {{ product_id|tojson }},
+        amount: {{ amount }},
+        return_url: {{ return_url|tojson }}
+      })
+    });
+    var data = await r.json();
+    if (data.success) {
+      if (data.redirect) {
+        window.location.href = data.redirect;
+      } else {
+        renderSuccess(data.tx_hash);
+      }
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Confirm payment';
+      alert(data.error || 'Payment failed');
+    }
+  } catch(e) {
+    btn.disabled = false;
+    btn.textContent = 'Confirm payment';
+    alert('Network error: ' + e.message);
+  }
+}
+function cancelPay() {
+  var ret = {{ return_url|tojson }};
+  if (ret) window.location.href = ret + (ret.indexOf('?')>=0?'&':'?') + 'status=cancelled';
+  else window.close();
+}
 </script>
 </body>
 </html>"""
